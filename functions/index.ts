@@ -6,104 +6,62 @@ import { Pool } from 'pg'
 
 type Bindings = {
   DATABASE_URL: string
+  DISCORD_TOKEN: string
+  ADMIN_SECRET: string // Webからの操作用の合言葉
 }
 
 const app = new Hono<{ Bindings: Bindings }>()
-
-// 管理画面(Pages)からの通信を許可
 app.use('/*', cors())
 
-/**
- * Prismaインスタンスを安全に作成する関数
- */
-const createPrisma = (databaseUrl: string) => {
-  // 文字列の前後にある余計なクォーテーションや空白を徹底的に消去
-  const cleanUrl = databaseUrl.trim().replace(/^["']|["']$/g, '');
-  
-  const pool = new Pool({ 
-    connectionString: cleanUrl,
-    ssl: { rejectUnauthorized: false }, // 自己署名証明書の接続を許可
-    connectionTimeoutMillis: 10000,
-  })
-  
-  const adapter = new PrismaPg(pool)
-  return new PrismaClient({ adapter })
+// セキュリティミドルウェア: ヘッダーに正しい合言葉がないと拒絶
+app.use('/admin/*', async (c, next) => {
+  const secret = c.req.header('X-Admin-Secret')
+  if (secret !== c.env.ADMIN_SECRET) return c.json({ error: 'Unauthorized' }, 401)
+  await next()
+})
+
+const getPrisma = (url: string) => {
+  const pool = new Pool({ connectionString: url, ssl: false })
+  return new PrismaClient({ adapter: new PrismaPg(pool) })
 }
 
-// 1. 生存確認用
-app.get('/', (c) => c.text("API is running"))
-
-// 2. 管理用データ取得
+// 1. 統計・注文取得
 app.get('/admin/stats', async (c) => {
-  const url = c.env.DATABASE_URL;
-
-  // 環境変数がない場合のデバッグ表示
-  if (!url) {
-    return c.json({ 
-      error: "DATABASE_URLが設定されていません。",
-      detected_vars: Object.keys(c.env) 
-    }, 500);
-  }
-
-  const prisma = createPrisma(url);
-  try {
-    const orders = await prisma.order.findMany({ orderBy: { createdAt: 'desc' } });
-    const config = await prisma.config.findFirst({ where: { id: 1 } });
-    
-    // 今日の売上 (簡易集計)
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const todaySales = orders
-      .filter(o => o.status === 'completed' && new Date(o.createdAt) >= today)
-      .reduce((sum, o) => sum + (o.totalPrice || 0), 0);
-
-    return c.json({
-      orders,
-      isShopOpen: (config as any)?.isShopOpen ?? true,
-      todaySales,
-      pendingCount: orders.filter(o => o.status === 'pending').length
-    });
-  } catch (e: any) {
-    console.error("DB_ERROR:", e.message);
-    return c.json({ error: "DB接続エラー: " + e.message }, 500);
-  } finally {
-    await prisma.$disconnect();
-  }
+  const prisma = getPrisma(c.env.DATABASE_URL)
+  const orders = await prisma.order.findMany({ orderBy: { createdAt: 'desc' } })
+  const config = await prisma.config.findFirst({ where: { id: 1 } })
+  return c.json({ orders, isShopOpen: (config as any)?.isShopOpen ?? true })
 })
 
-// 3. 受付停止切り替え
-app.post('/admin/toggle-shop', async (c) => {
-  const prisma = createPrisma(c.env.DATABASE_URL);
-  try {
-    const { open } = await c.req.json();
-    await (prisma.config as any).upsert({
-      where: { id: 1 },
-      update: { isShopOpen: open },
-      create: { id: 1, isShopOpen: open }
-    });
-    return c.json({ success: true });
-  } catch (e: any) {
-    return c.json({ error: e.message }, 500);
-  } finally {
-    await prisma.$disconnect();
-  }
+// 2. Webからユーザーへメッセージ送信 (Discord REST APIを使用)
+app.post('/admin/send-message', async (c) => {
+  const { userId, message } = await c.req.json()
+  const res = await fetch(`https://discord.com/api/v10/users/@me/channels`, {
+    method: 'POST',
+    headers: { Authorization: `Bot ${c.env.DISCORD_TOKEN}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ recipient_id: userId })
+  })
+  const channel = await res.json() as any
+  
+  await fetch(`https://discord.com/api/v10/channels/${channel.id}/messages`, {
+    method: 'POST',
+    headers: { Authorization: `Bot ${c.env.DISCORD_TOKEN}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content: `【管理者からのメッセージ】\n${message}` })
+  })
+  return c.json({ success: true })
 })
 
-// 4. 個人情報抹消
-app.post('/admin/scrub', async (c) => {
-  const prisma = createPrisma(c.env.DATABASE_URL);
-  try {
-    const { id } = await c.req.json();
-    await prisma.order.update({
-      where: { id: Number(id) },
-      data: { transferCode: "SCRUBBED", authPassword: "HIDDEN" }
-    });
-    return c.json({ success: true });
-  } catch (e: any) {
-    return c.json({ error: e.message }, 500);
-  } finally {
-    await prisma.$disconnect();
-  }
+// 3. 完了通知（スクショは外部URLまたは簡易送信）
+// ※本格的な画像アップロードはCloudflare R2が必要ですが、ここではテキストメッセージのみ例示
+app.post('/admin/complete', async (c) => {
+  const prisma = getPrisma(c.env.DATABASE_URL)
+  const { id, userId } = await c.req.json()
+  
+  // DB更新
+  await prisma.order.update({ where: { id }, data: { status: 'completed', completedAt: new Date() } })
+  
+  // Discordへ通知 (実績ボタン付きで送るにはGCP Bot経由が楽なため、ここではステータス更新のみ)
+  return c.json({ success: true })
 })
 
 export default app
