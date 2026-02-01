@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { PrismaClient } from '@prisma/client'
 import { PrismaPg } from '@prisma/adapter-pg'
-import { Client } from 'pg'
+import { Pool } from 'pg' // Client ではなく Pool をインポート
 
 type Bindings = {
   DATABASE_URL: string
@@ -13,9 +13,10 @@ app.use('/*', cors())
 
 // Prismaインスタンスを作成する関数
 const getPrisma = (databaseUrl: string) => {
-  const client = new Client({ connectionString: databaseUrl })
-  // Cloudflare Workersでは必ずこれを呼び出す必要がある
-  const adapter = new PrismaPg(client)
+  // connectionString を使って Pool を作成
+  const pool = new Pool({ connectionString: databaseUrl })
+  // Pool をアダプターに渡す
+  const adapter = new PrismaPg(pool)
   return new PrismaClient({ adapter })
 }
 
@@ -36,6 +37,8 @@ app.get('/admin/stats', async (c) => {
     })
   } catch (e: any) {
     return c.json({ error: e.message }, 500)
+  } finally {
+    await prisma.$disconnect()
   }
 })
 
@@ -51,6 +54,8 @@ app.post('/admin/toggle-shop', async (c) => {
     return c.json({ success: true })
   } catch (e: any) {
     return c.json({ error: e.message }, 500)
+  } finally {
+    await prisma.$disconnect()
   }
 })
 
@@ -65,6 +70,8 @@ app.post('/admin/scrub', async (c) => {
     return c.json({ success: true })
   } catch (e: any) {
     return c.json({ error: e.message }, 500)
+  } finally {
+    await prisma.$disconnect()
   }
 })
 
