@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
 }
 
 datasource db {
@@ -28,4 +29,5 @@ model Config {
   paypayToken   String?
   autoClaim     Boolean @default(true)
   isShopOpen    Boolean @default(true)
+
 }
