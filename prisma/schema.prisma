@@ -29,5 +29,4 @@ model Config {
   paypayToken   String?
   autoClaim     Boolean @default(true)
   isShopOpen    Boolean @default(true)
-
 }
