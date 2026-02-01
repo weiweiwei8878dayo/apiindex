@@ -2,7 +2,8 @@
   "name": "apiindex",
   "main": "functions/index.ts",
   "compatibility_date": "2026-02-01",
-  "compatibility_flags": [
-    "nodejs_compat"
-  ]
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "ADMIN_PASSWORD": "Yudai.2011"
+  }
 }
