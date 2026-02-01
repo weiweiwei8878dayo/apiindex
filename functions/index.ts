@@ -11,9 +11,10 @@ type Bindings = {
 const app = new Hono<{ Bindings: Bindings }>()
 app.use('/*', cors())
 
-// PrismaClientを初期化する関数
+// Prismaインスタンスを作成する関数
 const getPrisma = (databaseUrl: string) => {
   const client = new Client({ connectionString: databaseUrl })
+  // Cloudflare Workersでは必ずこれを呼び出す必要がある
   const adapter = new PrismaPg(client)
   return new PrismaClient({ adapter })
 }
@@ -25,7 +26,14 @@ app.get('/admin/stats', async (c) => {
   try {
     const orders = await prisma.order.findMany({ orderBy: { createdAt: 'desc' } })
     const config = await prisma.config.findFirst({ where: { id: 1 } })
-    return c.json({ orders, isShopOpen: (config as any)?.isShopOpen ?? true })
+    
+    return c.json({
+      orders,
+      isShopOpen: (config as any)?.isShopOpen ?? true,
+      todaySales: orders
+        .filter(o => o.status === 'completed')
+        .reduce((sum, o) => sum + (o.totalPrice || 0), 0)
+    })
   } catch (e: any) {
     return c.json({ error: e.message }, 500)
   }
