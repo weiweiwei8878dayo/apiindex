@@ -6,56 +6,71 @@ import { Pool } from 'pg'
 
 type Bindings = {
   DATABASE_URL: string
-  ADMIN_PASSWORD: string // 管理画面のログインパスワード
-  DISCORD_TOKEN: string
+  ADMIN_PASSWORD: string
 }
 
 const app = new Hono<{ Bindings: Bindings }>()
-app.use('/*', cors())
+
+// 【重要】CORS設定を強化（これで通信エラーを防ぐ）
+app.use('*', cors({
+  origin: '*',
+  allowMethods: ['GET', 'POST', 'OPTIONS'],
+  allowHeaders: ['Content-Type', 'Authorization'],
+}))
 
 const getPrisma = (url: string) => {
   const pool = new Pool({ connectionString: url.trim().replace(/^["']|["']$/g, ''), ssl: false })
   return new PrismaClient({ adapter: new PrismaPg(pool) })
 }
 
-// 認証チェック
+// 認証API
 app.post('/api/auth', async (c) => {
-  const { password } = await c.req.json()
-  if (password === c.env.ADMIN_PASSWORD) return c.json({ success: true, token: c.env.ADMIN_PASSWORD })
+  const body = await c.req.json()
+  if (body.password === c.env.ADMIN_PASSWORD) {
+    return c.json({ success: true })
+  }
   return c.json({ success: false }, 401)
 })
 
-// 認証ミドルウェア
-app.use('/api/admin/*', async (c, next) => {
-  const token = c.req.header('Authorization')
-  if (token !== c.env.ADMIN_PASSWORD) return c.json({ error: 'Unauthorized' }, 401)
-  await next()
-})
-
-// 注文一覧取得（全項目）
+// 管理者用API（ステータス取得・更新）
 app.get('/api/admin/stats', async (c) => {
+  const pw = c.req.header('Authorization')
+  if (pw !== c.env.ADMIN_PASSWORD) return c.json({ error: 'Unauthorized' }, 401)
+
   const prisma = getPrisma(c.env.DATABASE_URL)
   const orders = await prisma.order.findMany({ orderBy: { createdAt: 'desc' } })
   const config = await prisma.config.findFirst({ where: { id: 1 } })
   return c.json({ orders, isShopOpen: (config as any)?.isShopOpen ?? true })
 })
 
-// 個人情報抹消
-app.post('/api/admin/scrub', async (c) => {
+// ステータス更新（進行中・完了など）
+app.post('/api/admin/update-status', async (c) => {
+  const pw = c.req.header('Authorization')
+  if (pw !== c.env.ADMIN_PASSWORD) return c.json({ error: 'Unauthorized' }, 401)
+
   const prisma = getPrisma(c.env.DATABASE_URL)
-  const { id } = await c.req.json()
+  const { id, status } = await c.req.json()
   await prisma.order.update({
     where: { id: Number(id) },
-    data: { transferCode: "抹消済", authPassword: "抹消済" }
+    data: { 
+      status: status,
+      completedAt: status === 'completed' ? new Date() : undefined
+    }
   })
   return c.json({ success: true })
 })
 
-// ショップ切り替え
-app.post('/api/admin/toggle', async (c) => {
+// 個人情報抹消
+app.post('/api/admin/scrub', async (c) => {
+  const pw = c.req.header('Authorization')
+  if (pw !== c.env.ADMIN_PASSWORD) return c.json({ error: 'Unauthorized' }, 401)
+
   const prisma = getPrisma(c.env.DATABASE_URL)
-  const { open } = await c.req.json()
-  await (prisma.config as any).upsert({ where: { id: 1 }, update: { isShopOpen: open }, create: { id: 1, isShopOpen: open } })
+  const { id } = await c.req.json()
+  await prisma.order.update({
+    where: { id: Number(id) },
+    data: { transferCode: "抹消済み", authPassword: "抹消済み" }
+  })
   return c.json({ success: true })
 })
 
