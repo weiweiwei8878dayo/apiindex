@@ -19,29 +19,28 @@ app.use('*', cors({
 }))
 
 /**
- * DB接続用の関数 (SSL無効化とアダプター設定)
+ * データベース接続用関数
  */
 const getPrisma = (url: string) => {
+  const cleanUrl = url.trim().replace(/^["']|["']$/g, '');
   const pool = new Pool({ 
-    connectionString: url.trim().replace(/^["']|["']$/g, ''), 
-    ssl: false // GCP外部接続用にSSLをオフにする
+    connectionString: cleanUrl,
+    ssl: false // GCP外部接続用にSSLをオフ
   })
   const adapter = new PrismaPg(pool)
   return new PrismaClient({ adapter })
 }
 
-// 認証チェックAPI
+// 1. ログイン認証API
 app.post('/api/auth', async (c) => {
-  try {
-    const { password } = await c.req.json()
-    if (password === c.env.ADMIN_PASSWORD) return c.json({ success: true })
-    return c.json({ success: false }, 401)
-  } catch (e) {
-    return c.json({ error: "Invalid Request" }, 400)
+  const body = await c.req.json()
+  if (body.password === c.env.ADMIN_PASSWORD) {
+    return c.json({ success: true })
   }
+  return c.json({ success: false }, 401)
 })
 
-// 管理者API: 統計と注文取得
+// 2. 注文一覧・ステータス取得
 app.get('/api/admin/stats', async (c) => {
   const pw = c.req.header('Authorization')
   if (pw !== c.env.ADMIN_PASSWORD) return c.json({ error: 'Unauthorized' }, 401)
@@ -50,11 +49,7 @@ app.get('/api/admin/stats', async (c) => {
   try {
     const orders = await prisma.order.findMany({ orderBy: { createdAt: 'desc' } })
     const config = await prisma.config.findFirst({ where: { id: 1 } })
-    
-    return c.json({ 
-      orders, 
-      isShopOpen: (config as any)?.isShopOpen ?? true 
-    })
+    return c.json({ orders, isShopOpen: (config as any)?.isShopOpen ?? true })
   } catch (e: any) {
     return c.json({ error: e.message }, 500)
   } finally {
@@ -62,7 +57,7 @@ app.get('/api/admin/stats', async (c) => {
   }
 })
 
-// 管理者API: ステータス更新
+// 3. ステータス変更 (未着手/進行中/完了)
 app.post('/api/admin/update-status', async (c) => {
   const pw = c.req.header('Authorization')
   if (pw !== c.env.ADMIN_PASSWORD) return c.json({ error: 'Unauthorized' }, 401)
@@ -72,7 +67,10 @@ app.post('/api/admin/update-status', async (c) => {
     const { id, status } = await c.req.json()
     await prisma.order.update({
       where: { id: Number(id) },
-      data: { status }
+      data: { 
+        status: status,
+        completedAt: status === 'completed' ? new Date() : undefined
+      }
     })
     return c.json({ success: true })
   } catch (e: any) {
@@ -82,7 +80,7 @@ app.post('/api/admin/update-status', async (c) => {
   }
 })
 
-// 管理者API: 情報抹消
+// 4. 個人情報抹消
 app.post('/api/admin/scrub', async (c) => {
   const pw = c.req.header('Authorization')
   if (pw !== c.env.ADMIN_PASSWORD) return c.json({ error: 'Unauthorized' }, 401)
@@ -92,7 +90,7 @@ app.post('/api/admin/scrub', async (c) => {
     const { id } = await c.req.json()
     await prisma.order.update({
       where: { id: Number(id) },
-      data: { transferCode: "SCRUBBED", authPassword: "HIDDEN" }
+      data: { transferCode: "抹消済み", authPassword: "抹消済み" }
     })
     return c.json({ success: true })
   } catch (e: any) {
@@ -102,25 +100,25 @@ app.post('/api/admin/scrub', async (c) => {
   }
 })
 
-// 管理者API: 受付停止切り替え
+// 5. ショップの受付停止・再開
 app.post('/api/admin/toggle', async (c) => {
-    const pw = c.req.header('Authorization')
-    if (pw !== c.env.ADMIN_PASSWORD) return c.json({ error: 'Unauthorized' }, 401)
-  
-    const prisma = getPrisma(c.env.DATABASE_URL)
-    try {
-      const { open } = await c.req.json()
-      await (prisma.config as any).upsert({
-        where: { id: 1 },
-        update: { isShopOpen: open },
-        create: { id: 1, isShopOpen: open }
-      })
-      return c.json({ success: true })
-    } catch (e: any) {
-      return c.json({ error: e.message }, 500)
-    } finally {
-      await prisma.$disconnect()
-    }
+  const pw = c.req.header('Authorization')
+  if (pw !== c.env.ADMIN_PASSWORD) return c.json({ error: 'Unauthorized' }, 401)
+
+  const prisma = getPrisma(c.env.DATABASE_URL)
+  try {
+    const { open } = await c.req.json()
+    await (prisma.config as any).upsert({
+      where: { id: 1 },
+      update: { isShopOpen: open },
+      create: { id: 1, isShopOpen: open }
+    })
+    return c.json({ success: true })
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500)
+  } finally {
+    await prisma.$disconnect()
+  }
 })
 
 export default app
