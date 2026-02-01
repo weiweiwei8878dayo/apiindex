@@ -1,0 +1,31 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Order {
+  id            Int       @id @default(autoincrement())
+  userId        String
+  username      String
+  services      String[]
+  details       String?
+  transferCode  String
+  authPassword  String
+  paypayUrl     String
+  totalPrice    Int       @default(0)
+  status        String    @default("pending")
+  reviewPosted  Boolean   @default(false)
+  completedAt   DateTime?
+  createdAt     DateTime  @default(now())
+}
+
+model Config {
+  id            Int     @id @default(1)
+  paypayToken   String?
+  autoClaim     Boolean @default(true)
+  isShopOpen    Boolean @default(true)
+}
