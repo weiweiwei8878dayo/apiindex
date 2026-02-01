@@ -2,8 +2,14 @@
   "name": "apiindex",
   "main": "functions/index.ts",
   "compatibility_date": "2026-02-01",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
   "vars": {
+    // 【注意】GitHubが公開（Public）の場合は、パスワードが漏れるためここには書かず、
+    // CloudflareダッシュボードのSettings > Variablesだけで管理することを推奨します。
+    // ローカル開発で同期させたい場合のみ、以下を書き換えてください。
+    "DATABASE_URL": "postgresql://postgres:password@35.200.70.243:5432/daikodb?sslmode=disable",
     "ADMIN_PASSWORD": "Yudai.2011"
   }
 }
