@@ -1,8 +1,8 @@
 {
-  "name": "daiko-api",
-  "main": "functions/index.ts", // ここが重要！コードの本体ファイルを指定
+  "name": "apiindex",
+  "main": "functions/index.ts", 
   "compatibility_date": "2026-02-01",
   "compatibility_flags": [
-    "nodejs_compat" // Prismaを動かすために必須
+    "nodejs_compat"
   ]
 }
